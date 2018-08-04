@@ -64,6 +64,7 @@ struct webview_priv {
 #include <shobjidl.h>
 
 #include <stdio.h>
+#include <tchar.h>
 
 struct webview_priv {
   HWND hwnd;
@@ -886,7 +887,7 @@ UI_FilterDataObject(IDocHostUIHandler FAR *This, IDataObject __RPC_FAR *pDO,
   return S_FALSE;
 }
 
-static const TCHAR *classname = "WebView";
+static const TCHAR *classname = TEXT("WebView");
 static const SAFEARRAYBOUND ArrayBound = {1, 0};
 
 static IOleClientSiteVtbl MyIOleClientSiteTable = {
@@ -1057,7 +1058,6 @@ static int DisplayHTMLPage(struct webview *w) {
     }
     VariantInit(&myURL);
     myURL.vt = VT_BSTR;
-#ifndef UNICODE
     {
       wchar_t *buffer = webview_to_utf16(webPageName);
       if (buffer == NULL) {
@@ -1066,9 +1066,6 @@ static int DisplayHTMLPage(struct webview *w) {
       myURL.bstrVal = SysAllocString(buffer);
       GlobalFree(buffer);
     }
-#else
-    myURL.bstrVal = SysAllocString(webPageName);
-#endif
     if (!myURL.bstrVal) {
     badalloc:
       webBrowser2->lpVtbl->Release(webBrowser2);
@@ -1098,7 +1095,6 @@ static int DisplayHTMLPage(struct webview *w) {
                                        (SAFEARRAYBOUND *)&ArrayBound))) {
           if (!SafeArrayAccessData(sfArray, (void **)&pVar)) {
             pVar->vt = VT_BSTR;
-#ifndef UNICODE
             {
               wchar_t *buffer = webview_to_utf16(url);
               if (buffer == NULL) {
@@ -1107,9 +1103,6 @@ static int DisplayHTMLPage(struct webview *w) {
               bstr = SysAllocString(buffer);
               GlobalFree(buffer);
             }
-#else
-            bstr = SysAllocString(string);
-#endif
             if ((pVar->bstrVal = bstr)) {
               htmlDoc2->lpVtbl->write(htmlDoc2, sfArray);
               htmlDoc2->lpVtbl->close(htmlDoc2);
@@ -1164,8 +1157,8 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT uMsg, WPARAM wParam,
 }
 
 #define WEBVIEW_KEY_FEATURE_BROWSER_EMULATION                                  \
-  "Software\\Microsoft\\Internet "                                             \
-  "Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION"
+  TEXT("Software\\Microsoft\\Internet "                                             \
+  "Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION")
 
 static int webview_fix_ie_compat_mode() {
   HKEY hKey;
@@ -1175,7 +1168,7 @@ static int webview_fix_ie_compat_mode() {
   if (GetModuleFileName(NULL, appname, MAX_PATH + 1) == 0) {
     return -1;
   }
-  for (p = &appname[strlen(appname) - 1]; p != appname && *p != '\\'; p--) {
+  for (p = &appname[_tcslen(appname) - 1]; p != appname && *p != '\\'; p--) {
   }
   p++;
   if (RegCreateKey(HKEY_CURRENT_USER, WEBVIEW_KEY_FEATURE_BROWSER_EMULATION,
@@ -1236,7 +1229,7 @@ WEBVIEW_API int webview_init(struct webview *w) {
   rect.top = top;
 
   w->priv.hwnd =
-      CreateWindowEx(0, classname, w->title, style, rect.left, rect.top,
+      CreateWindowEx(0, classname, NULL, style, rect.left, rect.top,
                      rect.right - rect.left, rect.bottom - rect.top,
                      HWND_DESKTOP, NULL, hInstance, (void *)w);
   if (w->priv.hwnd == 0) {
@@ -1248,7 +1241,7 @@ WEBVIEW_API int webview_init(struct webview *w) {
 
   DisplayHTMLPage(w);
 
-  SetWindowText(w->priv.hwnd, w->title);
+  webview_set_title(w, w->title);
   ShowWindow(w->priv.hwnd, SW_SHOWDEFAULT);
   UpdateWindow(w->priv.hwnd);
   SetFocus(w->priv.hwnd);
@@ -1365,7 +1358,17 @@ WEBVIEW_API void webview_dispatch(struct webview *w, webview_dispatch_fn fn,
 }
 
 WEBVIEW_API void webview_set_title(struct webview *w, const char *title) {
+#ifndef UNICODE
   SetWindowText(w->priv.hwnd, title);
+#else
+  wchar_t *buffer = webview_to_utf16(title);
+  if (buffer == NULL) {
+    SetWindowTextA(w->priv.hwnd, title);
+  } else {
+    SetWindowText(w->priv.hwnd, buffer);
+    GlobalFree(buffer);
+  }
+#endif
 }
 
 WEBVIEW_API void webview_set_fullscreen(struct webview *w, int fullscreen) {
@@ -1580,14 +1583,30 @@ WEBVIEW_API void webview_dialog(struct webview *w,
       type |= MB_ICONERROR;
       break;
     }
+#ifndef UNICODE
     MessageBox(w->priv.hwnd, arg, title, type);
+#else
+    WCHAR *wtitle = webview_to_utf16(title);
+    WCHAR *warg = webview_to_utf16(arg);
+    MessageBox(w->priv.hwnd, warg, wtitle, type);
+    GlobalFree(warg);
+    GlobalFree(wtitle);
+#endif // UNICODE
 #endif
   }
 }
 
 WEBVIEW_API void webview_terminate(struct webview *w) { PostQuitMessage(0); }
 WEBVIEW_API void webview_exit(struct webview *w) { OleUninitialize(); }
-WEBVIEW_API void webview_print_log(const char *s) { OutputDebugString(s); }
+WEBVIEW_API void webview_print_log(const char *s) { 
+#ifndef UNICODE
+  OutputDebugString(s); 
+#else
+  WCHAR *ws = webview_to_utf16(s);
+  OutputDebugString(ws); 
+  GlobalFree(ws);
+#endif
+}
 
 #endif /* WEBVIEW_WINAPI */
 
